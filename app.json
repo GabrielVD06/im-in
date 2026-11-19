@@ -1,18 +1,23 @@
 {
   "expo": {
-    "name": "newApk",
-    "slug": "newApk",
+    "name": "I'm in",
+    "slug": "salida",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "newapk",
+    "scheme": "salida",
     "userInterfaceStyle": "automatic",
     "ios": {
-      "icon": "./assets/expo.icon"
+      "icon": "./assets/expo.icon",
+      "bundleIdentifier": "app.salida.pasto",
+      "infoPlist": {
+        "NSPhotoLibraryUsageDescription": "I'm in usa tu foto para que las personas te reconozcan cuando quedan contigo."
+      }
     },
     "android": {
+      "package": "app.salida.pasto",
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
+        "backgroundColor": "#F4F1EC",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
         "backgroundImage": "./assets/images/android-icon-background.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
@@ -28,11 +33,24 @@
       [
         "expo-splash-screen",
         {
-          "backgroundColor": "#208AEF",
+          "backgroundColor": "#F4F1EC",
           "image": "./assets/images/splash-icon.png",
           "imageWidth": 76
         }
-      ]
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "I'm in usa tu foto para que las personas te reconozcan cuando quedan contigo."
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "I'm in usa tu ubicación para centrar el mapa y mostrar quedadas cerca. A las demás personas no se les publica tu punto exacto."
+        }
+      ],
+      "@react-native-community/datetimepicker"
     ],
     "experiments": {
       "typedRoutes": true,

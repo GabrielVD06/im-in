@@ -11,7 +11,7 @@ export default function GenteScreen() {
   const { meetups } = useMeetups();
 
   return (
-    <Screen title="Match" subtitle="Personas y grupos de Pasto con un ritmo y una distancia parecidos a los tuyos. Una salida muestra el lugar del plan, no el punto exacto de nadie.">
+    <Screen title="Match" subtitle="Para conocer personas de Pasto con un deporte parecido al tuyo.">
       {profile.sports.length === 0 ? (
         <InfoCard kicker="Tu perfil" title="Primero elige un deporte" body="Sin un deporte, I'm in no sabe con quién compararte." />
       ) : (
@@ -25,7 +25,7 @@ export default function GenteScreen() {
               key={sport.sportId}
               kicker={levelName(sport.level) || 'Sin nivel'}
               title={sportName(sport.sportId)}
-              body="Aún no hay personas con este nivel en Pasto. Cuando lleguen, las ves en esta tarjeta."
+              body="Aún no hay personas para conocer con este nivel en Pasto."
             />
           );
         })

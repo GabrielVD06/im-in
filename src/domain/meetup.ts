@@ -25,12 +25,14 @@ export type Meetup = {
   sportId: SportId;
   level: LevelId | null;
   whenLabel: string;
+  whenAt?: string;
   placeName: string;
   latitude: number;
   longitude: number;
   note: string;
   hostName: string;
   hostUsername: string;
+  going?: boolean;
   createdAt: string;
   audience?: MeetupAudience;
   distanceKm?: number;
@@ -113,4 +115,74 @@ export const WHEN_OPTIONS = ['Hoy · 6:00 p. m.', 'Mañana · 6:00 a. m.', 'Mañ
 
 export function meetupPoint(meetup: Meetup): LatLng {
   return { latitude: meetup.latitude, longitude: meetup.longitude };
+}
+
+const START_EARLY_MS = 5 * 60_000;
+const START_LATE_MS = 10 * 60_000;
+
+export function scheduledAt(meetup: Meetup) {
+  if (meetup.whenAt) {
+    const time = Date.parse(meetup.whenAt);
+    if (Number.isFinite(time)) {
+      return time;
+    }
+  }
+  return scheduledFromLabel(meetup.whenLabel, meetup.createdAt);
+}
+
+export function canBeginMeetup(meetup: Meetup, now = Date.now()) {
+  const at = scheduledAt(meetup);
+  if (at === null) {
+    return false;
+  }
+  return now >= at - START_EARLY_MS && now <= at + START_LATE_MS;
+}
+
+function scheduledFromLabel(label: string, createdAt: string) {
+  const [dayText, timeText] = label.split('·').map((part) => part.trim());
+  const created = new Date(createdAt);
+  if (!dayText || !timeText || Number.isNaN(created.getTime())) {
+    return null;
+  }
+  const day = new Date(created);
+  day.setHours(0, 0, 0, 0);
+  if (/^mañana$/i.test(dayText)) {
+    day.setDate(day.getDate() + 1);
+  } else if (!/^hoy$/i.test(dayText)) {
+    return null;
+  }
+  const clock = parseClock(timeText);
+  if (!clock) {
+    return null;
+  }
+  day.setHours(clock.hours, clock.minutes, 0, 0);
+  return day.getTime();
+}
+
+function parseClock(value: string) {
+  const hour12 = value.match(/(\d{1,2}):(\d{2})\s*([ap])\.?\s*m\.?/i);
+  if (hour12) {
+    let hours = Number(hour12[1]);
+    const minutes = Number(hour12[2]);
+    const pm = hour12[3].toLowerCase() === 'p';
+    if (hours === 12) {
+      hours = pm ? 12 : 0;
+    } else if (pm) {
+      hours += 12;
+    }
+    if (hours > 23 || minutes > 59) {
+      return null;
+    }
+    return { hours, minutes };
+  }
+  const hour24 = value.match(/^(\d{1,2}):(\d{2})$/);
+  if (!hour24) {
+    return null;
+  }
+  const hours = Number(hour24[1]);
+  const minutes = Number(hour24[2]);
+  if (hours > 23 || minutes > 59) {
+    return null;
+  }
+  return { hours, minutes };
 }

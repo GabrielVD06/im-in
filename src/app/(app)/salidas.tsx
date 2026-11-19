@@ -9,8 +9,8 @@ import { FadeSwap } from '@/components/fade-swap';
 import { PageSwitch } from '@/components/page-switch';
 import { Button, Pill } from '@/components/button';
 import { PASTO, RADII_KM, distanceKm, formatDistance, type LatLng, type RadiusKm } from '@/domain/geo';
-import { isPublicMeetup, isRouteSport, meetupPoint, planSummary, type Meetup } from '@/domain/meetup';
-import { consentAccepted, levelName, sportName, upsertConsent } from '@/domain/profile';
+import { canBeginMeetup, isPublicMeetup, isRouteSport, meetupPoint, planSummary, type Meetup } from '@/domain/meetup';
+import { SPORTS, consentAccepted, levelName, sportName, upsertConsent, type SportId } from '@/domain/profile';
 import { traceSpeedCap } from '@/domain/trace-fix';
 import { useMeetups } from '@/state/meetup-context';
 import { useProfile } from '@/state/profile-context';
@@ -58,18 +58,21 @@ export default function SalidasScreen() {
   const steps = useStepCounter(trace.active);
   const [trackingId, setTrackingId] = useState<string | null>(null);
   const locationOn = consentAccepted(profile, 'location');
-  const [page, setPage] = useState<'public' | 'friends'>('public');
+  const [page, setPage] = useState<'public' | 'friends' | 'events'>('public');
+  const [now, setNow] = useState(() => Date.now());
   const [showMap, setShowMap] = useState(false);
   const [radius, setRadius] = useState<RadiusKm>(5);
   const [query, setQuery] = useState('');
+  const [sportFilter, setSportFilter] = useState<SportId | null>(null);
+  const [filterOpen, setFilterOpen] = useState(false);
   const [search, setSearch] = useState<LatLng>(PASTO);
-  const [mapCenter, setMapCenter] = useState<LatLng>(PASTO);
   const [focus, setFocus] = useState<(LatLng & { token: number }) | null>(null);
   const [followToken, setFollowToken] = useState(0);
   const bearingMode = useMapBearing();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [locateMessage, setLocateMessage] = useState('');
   const mapBeside = frame.tablet && page === 'public';
+  const mapOpen = showMap && !frame.tablet;
 
   useEffect(() => {
     if (!locationOn) {
@@ -104,16 +107,24 @@ export default function SalidasScreen() {
       })
       .sort((a, b) => a.km - b.km);
   }, [meetups, query, radius, search]);
+  const mapped = useMemo(() => {
+    const anchor = point ?? search;
+    return meetups
+      .filter(isPublicMeetup)
+      .filter((meetup) => !sportFilter || meetup.sportId === sportFilter)
+      .map((meetup) => ({ meetup, km: distanceKm(anchor, meetupPoint(meetup)) }))
+      .sort((a, b) => a.km - b.km);
+  }, [meetups, point, search, sportFilter]);
   const markers = useMemo(
     () =>
-      nearby.flatMap(({ meetup }) => {
+      mapped.flatMap(({ meetup }) => {
         const start = { id: meetup.id, latitude: meetup.latitude, longitude: meetup.longitude, color: '#2457D6', sport: meetup.sportId };
         if (!meetup.finish) {
           return [start];
         }
         return [start, { id: meetup.id, latitude: meetup.finish.latitude, longitude: meetup.finish.longitude, color: '#E07A2F' }];
       }),
-    [nearby],
+    [mapped],
   );
   const mapLines = useMemo(() => {
     if (!trackingId) {
@@ -125,10 +136,9 @@ export default function SalidasScreen() {
   }, [trackingId, trace.segments]);
   const trackingMeetup = meetups.find((meetup) => meetup.id === trackingId) ?? null;
   const selected =
-    nearby.find((item) => item.meetup.id === selectedId) ??
-    (trackingMeetup && trackingMeetup.id === selectedId ? { meetup: trackingMeetup, km: distanceKm(search, meetupPoint(trackingMeetup)) } : null);
+    mapped.find((item) => item.meetup.id === selectedId) ??
+    (trackingMeetup && trackingMeetup.id === selectedId ? { meetup: trackingMeetup, km: distanceKm(point ?? search, meetupPoint(trackingMeetup)) } : null);
   const livePoint = trackingId && trace.live ? trace.live : point;
-  const moved = distanceKm(search, mapCenter) > 0.3;
 
   function jump(next: LatLng) {
     setSearch(next);
@@ -138,6 +148,14 @@ export default function SalidasScreen() {
 
   function ownMeetup(meetup: Meetup) {
     return !meetup.hostUsername || meetup.hostUsername === profile.username;
+  }
+
+  function canStart(meetup: Meetup) {
+    return ownMeetup(meetup) && isRouteSport(meetup.sportId) && trackingId !== meetup.id && canBeginMeetup(meetup, now);
+  }
+
+  function toggleGoing(meetup: Meetup) {
+    void update(meetup.id, { going: !meetup.going });
   }
 
   async function beginMeetup(meetup: Meetup) {
@@ -206,12 +224,22 @@ export default function SalidasScreen() {
     setLocateMessage(permission.status === 'granted' ? 'No pude leer el GPS. Inténtalo otra vez.' : 'Autoriza la ubicación para centrarte.');
   }
 
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 30_000);
+    return () => clearInterval(timer);
+  }, []);
+
   const feed = (
     <FadeSwap pageKey={page} style={styles.swap}>
       {page === 'friends' ? (
         <View style={styles.emptyWrap}>
           <Text style={styles.emptyTitle}>Aún no hay amigos</Text>
-          <Text style={styles.emptyBody}>Cuando quedes con alguien, sus salidas aparecen en esta página. Las abiertas siguen en Públicas.</Text>
+          <Text style={styles.emptyBody}>Cuando tengas amigos, aquí ves sus salidas y sus posts.</Text>
+        </View>
+      ) : page === 'events' ? (
+        <View style={styles.emptyWrap}>
+          <Text style={styles.emptyTitle}>Aún no hay eventos</Text>
+          <Text style={styles.emptyBody}>Aquí se publican las carreras y los eventos oficiales de Pasto.</Text>
         </View>
       ) : showMap && !frame.tablet ? (
         <View style={styles.mapWrap}>
@@ -222,22 +250,20 @@ export default function SalidasScreen() {
             heading={heading}
             activityNote={trackingId ? `${segmentsLabel(trace.segments)} por donde vas` : undefined}
             onFinish={trackingId ? finishTracking : undefined}
-            onStart={
-              selected && ownMeetup(selected.meetup) && isRouteSport(selected.meetup.sportId) && trackingId !== selected.meetup.id
-                ? () => beginMeetup(selected.meetup)
-                : undefined
-            }
+            onStart={selected && canStart(selected.meetup) ? () => beginMeetup(selected.meetup) : undefined}
+            own={selected ? ownMeetup(selected.meetup) : false}
+            going={selected?.meetup.going}
+            onJoin={selected && !ownMeetup(selected.meetup) ? () => toggleGoing(selected.meetup) : undefined}
+            live={selected?.meetup.id === trackingId}
             focus={focus}
             followToken={followToken}
             bearingMode={bearingMode}
             onUserMove={() => setFollowToken(0)}
-            moved={moved}
             selected={selected}
             styles={styles}
-            onCenter={setMapCenter}
             onSelect={setSelectedId}
             onLocate={trackingId ? () => setFollowToken(Date.now()) : goToMe}
-            onSearchHere={() => setSearch(mapCenter)}
+            onClose={() => setSelectedId(null)}
             onRemove={remove}
           />
         </View>
@@ -258,7 +284,9 @@ export default function SalidasScreen() {
                 live={meetup.id === trackingId}
                 styles={styles}
                 onPress={() => open(meetup)}
-                onStart={ownMeetup(meetup) && isRouteSport(meetup.sportId) && meetup.id !== trackingId ? () => beginMeetup(meetup) : undefined}
+                onStart={canStart(meetup) ? () => beginMeetup(meetup) : undefined}
+                onJoin={ownMeetup(meetup) ? undefined : () => toggleGoing(meetup)}
+                going={meetup.going}
                 onFinish={meetup.id === trackingId ? finishTracking : undefined}
                 onRemove={() => remove(meetup.id)}
               />
@@ -278,9 +306,11 @@ export default function SalidasScreen() {
       <SafeAreaView style={[styles.safe, frame.wide && !frame.tablet ? styles.safeWide : null]} edges={['top', 'left', 'right']}>
         <View style={styles.body}>
           <View style={[styles.column, mapBeside ? styles.columnTablet : null]}>
-            <View style={styles.header}>
-              <Text style={styles.title}>Salidas</Text>
-              <Text style={styles.subtitle}>{point ? 'Cerca de ti, en Pasto.' : 'Activa la ubicación para ver las que te quedan cerca.'}</Text>
+            <View style={[styles.header, mapOpen ? styles.headerMap : null]}>
+              <Text style={[styles.title, mapOpen ? styles.titleMap : null]}>Salidas</Text>
+              {mapOpen ? null : (
+                <Text style={styles.subtitle}>{point ? 'Cerca de ti, en Pasto.' : 'Activa la ubicación para ver las que te quedan cerca.'}</Text>
+              )}
               {locateMessage ? <Text style={styles.note}>{locateMessage}</Text> : null}
             </View>
             <PageSwitch
@@ -288,16 +318,67 @@ export default function SalidasScreen() {
               options={[
                 { id: 'public', label: 'Públicas' },
                 { id: 'friends', label: 'Amigos' },
+                { id: 'events', label: 'Eventos' },
               ]}
               onChange={(id) => {
-                setPage(id === 'friends' ? 'friends' : 'public');
-                if (id === 'friends') {
+                const next = id === 'friends' || id === 'events' ? id : 'public';
+                setPage(next);
+                if (next !== 'public') {
                   setShowMap(false);
+                  setFilterOpen(false);
                 }
               }}
             />
             {page === 'public' ? (
-              <View style={styles.tools}>
+              <View style={[styles.tools, mapOpen ? styles.toolsMap : null, filterOpen ? styles.toolsFront : null]}>
+                {mapOpen ? (
+                  <>
+                    <View style={styles.split}>
+                      <View style={styles.filterSlot}>
+                        <Pressable
+                          accessibilityRole="button"
+                          onPress={() => setFilterOpen((open) => !open)}
+                          style={[styles.filterButton, sportFilter ? styles.splitButtonOn : null]}>
+                          <Text style={styles.splitLabel}>{sportFilter ? sportName(sportFilter) : 'Filtro'}</Text>
+                        </Pressable>
+                        {filterOpen ? (
+                          <View style={styles.filterMenu}>
+                            <Pressable
+                              accessibilityRole="button"
+                              onPress={() => {
+                                setSportFilter(null);
+                                setFilterOpen(false);
+                              }}
+                              style={[styles.filterOption, !sportFilter ? styles.filterOptionOn : null]}>
+                              <Text style={[styles.splitLabel, !sportFilter ? styles.filterOptionLabelOn : null]}>Todo</Text>
+                            </Pressable>
+                            {SPORTS.map((sport) => (
+                              <Pressable
+                                key={sport.id}
+                                accessibilityRole="button"
+                                onPress={() => {
+                                  setSportFilter(sport.id);
+                                  setFilterOpen(false);
+                                }}
+                                style={[styles.filterOption, sportFilter === sport.id ? styles.filterOptionOn : null]}>
+                                <Text style={[styles.splitLabel, sportFilter === sport.id ? styles.filterOptionLabelOn : null]}>{sport.name}</Text>
+                              </Pressable>
+                            ))}
+                          </View>
+                        ) : null}
+                      </View>
+                      <Pressable
+                        accessibilityRole="button"
+                        onPress={() => {
+                          setFilterOpen(false);
+                          setShowMap(false);
+                        }}
+                        style={styles.splitButton}>
+                        <Text style={styles.mapLinkLabel}>Lista</Text>
+                      </Pressable>
+                    </View>
+                  </>
+                ) : (
                 <TextInput
                   value={query}
                   onChangeText={setQuery}
@@ -307,20 +388,21 @@ export default function SalidasScreen() {
                   autoCorrect={false}
                   autoCapitalize="none"
                 />
-                <View style={[styles.toolRow, showMap ? styles.toolRowMap : null]}>
-                  {showMap ? null : (
+                )}
+                {mapOpen ? null : (
+                  <View style={styles.toolRow}>
                     <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.radiiScroll} contentContainerStyle={styles.radii}>
                       {RADII_KM.map((value) => (
                         <Pill key={value} label={`${value} km`} selected={radius === value} onPress={() => setRadius(value)} />
                       ))}
                     </ScrollView>
-                  )}
-                  {frame.tablet ? null : (
-                    <Pressable accessibilityRole="button" onPress={() => setShowMap((current) => !current)} style={styles.mapLink}>
-                      <Text style={styles.mapLinkLabel}>{showMap ? 'Lista' : 'Mapa'}</Text>
-                    </Pressable>
-                  )}
-                </View>
+                    {frame.tablet ? null : (
+                      <Pressable accessibilityRole="button" onPress={() => setShowMap(true)} style={styles.mapLink}>
+                        <Text style={styles.mapLinkLabel}>Mapa</Text>
+                      </Pressable>
+                    )}
+                  </View>
+                )}
               </View>
             ) : null}
             {feed}
@@ -334,22 +416,20 @@ export default function SalidasScreen() {
             heading={heading}
             activityNote={trackingId ? `${segmentsLabel(trace.segments)} por donde vas` : undefined}
             onFinish={trackingId ? finishTracking : undefined}
-            onStart={
-              selected && ownMeetup(selected.meetup) && isRouteSport(selected.meetup.sportId) && trackingId !== selected.meetup.id
-                ? () => beginMeetup(selected.meetup)
-                : undefined
-            }
+            onStart={selected && canStart(selected.meetup) ? () => beginMeetup(selected.meetup) : undefined}
+            own={selected ? ownMeetup(selected.meetup) : false}
+            going={selected?.meetup.going}
+            onJoin={selected && !ownMeetup(selected.meetup) ? () => toggleGoing(selected.meetup) : undefined}
+            live={selected?.meetup.id === trackingId}
                 focus={focus}
                 followToken={followToken}
                 bearingMode={bearingMode}
                 onUserMove={() => setFollowToken(0)}
-                moved={moved}
                 selected={selected}
                 styles={styles}
-                onCenter={setMapCenter}
                 onSelect={setSelectedId}
                 onLocate={trackingId ? () => setFollowToken(Date.now()) : goToMe}
-                onSearchHere={() => setSearch(mapCenter)}
+                onClose={() => setSelectedId(null)}
                 onRemove={remove}
               />
             </View>
@@ -369,14 +449,16 @@ function MapPane({
   followToken,
   bearingMode,
   onUserMove,
-  moved,
   selected,
+  own = false,
+  going = false,
+  live = false,
   activityNote,
   styles,
-  onCenter,
   onSelect,
   onLocate,
-  onSearchHere,
+  onClose,
+  onJoin,
   onRemove,
   onStart,
   onFinish,
@@ -389,20 +471,22 @@ function MapPane({
   followToken: number;
   bearingMode: 'north' | 'heading';
   onUserMove: () => void;
-  moved: boolean;
   selected: { meetup: Meetup; km: number } | null;
+  own?: boolean;
+  going?: boolean;
+  live?: boolean;
   activityNote?: string;
   styles: ReturnType<typeof createStyles>;
-  onCenter: (point: LatLng) => void;
   onSelect: (id: string) => void;
   onLocate: () => void;
-  onSearchHere: () => void;
+  onClose?: () => void;
+  onJoin?: () => void;
   onRemove: (id: string) => void;
   onStart?: () => void;
   onFinish?: () => void;
 }) {
   return (
-    <View style={styles.mapWrap}>
+    <View style={styles.mapFill}>
       <CityMap
         markers={markers}
         lines={lines}
@@ -413,11 +497,9 @@ function MapPane({
         bearingMode={bearingMode}
         onUserMove={onUserMove}
         rounded={false}
-        onCenter={onCenter}
         onSelect={onSelect}
       />
       <View style={styles.mapTools}>
-        <Pill label={followToken > 0 ? 'Siguiendo' : point ? 'Mi ubicación' : 'Activar ubicación'} onPress={onLocate} selected={followToken > 0} />
         {onFinish ? (
           <Pill
             label={bearingMode === 'heading' ? 'Rumbo' : 'Norte'}
@@ -429,17 +511,43 @@ function MapPane({
             }}
           />
         ) : null}
-        {moved ? <Pill label="Buscar aquí" tone="solid" onPress={onSearchHere} /> : null}
       </View>
-      {selected || onFinish ? (
+      <View style={styles.dock} pointerEvents="box-none">
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={point ? 'Mi ubicación' : 'Activar ubicación'}
+          onPress={onLocate}
+          style={styles.locate}>
+          <View style={styles.locateRing} />
+          <View style={[styles.locateDot, followToken > 0 ? styles.locateDotOn : null]} />
+        </Pressable>
+        {selected || onFinish ? (
         <View style={styles.sheet}>
-          {activityNote ? <Text style={styles.planNote}>{activityNote}</Text> : null}
-          {onFinish ? <Button label="Terminar" size="compact" onPress={onFinish} /> : null}
-          {onStart ? <Button label="Iniciar" size="compact" onPress={onStart} /> : null}
-          {selected ? <MeetupCard meetup={selected.meetup} km={selected.km} own={false} styles={styles} /> : null}
-          {selected ? <Button label="Quitar esta salida" variant="quiet" size="compact" onPress={() => onRemove(selected.meetup.id)} /> : null}
+          {activityNote || onFinish ? (
+            <View style={styles.sheetTools}>
+              {activityNote ? <Text style={styles.planNote}>{activityNote}</Text> : null}
+              {onFinish ? <Button label="Terminar" size="compact" onPress={onFinish} /> : null}
+            </View>
+          ) : null}
+          {selected ? (
+            <MeetupCard
+              meetup={selected.meetup}
+              km={selected.km}
+              own={own}
+              compact
+              docked
+              live={live}
+              going={going}
+              onStart={onStart}
+              onJoin={onJoin}
+              onClose={onClose}
+              onRemove={own ? () => onRemove(selected.meetup.id) : undefined}
+              styles={styles}
+            />
+          ) : null}
         </View>
       ) : null}
+      </View>
     </View>
   );
 }
@@ -448,9 +556,14 @@ function MeetupCard({
   meetup,
   km,
   own,
+  compact = false,
+  docked = false,
   live,
+  going = false,
   onPress,
   onStart,
+  onJoin,
+  onClose,
   onFinish,
   onRemove,
   styles,
@@ -458,24 +571,41 @@ function MeetupCard({
   meetup: Meetup;
   km: number;
   own: boolean;
+  compact?: boolean;
+  docked?: boolean;
   live?: boolean;
+  going?: boolean;
   onPress?: () => void;
   onStart?: () => void;
+  onJoin?: () => void;
+  onClose?: () => void;
   onFinish?: () => void;
   onRemove?: () => void;
   styles: ReturnType<typeof createStyles>;
 }) {
   const plan = planSummary(meetup);
   const body = (
-    <View style={styles.card}>
+    <View style={[styles.card, compact ? styles.cardCompact : null, docked ? styles.cardDocked : null]}>
       <View style={styles.cardTop}>
         <View style={styles.avatar}>
           <Text style={styles.avatarLabel}>{initials(meetup.hostName)}</Text>
         </View>
         <View style={styles.cardIdentity}>
-          <Text style={styles.host} numberOfLines={1}>
-            {meetup.hostName || 'Alguien en Pasto'}
-          </Text>
+          <View style={styles.nameLine}>
+            <Text style={styles.host} numberOfLines={1}>
+              {meetup.hostName || 'Alguien en Pasto'}
+            </Text>
+            {onStart ? (
+              <Pressable accessibilityRole="button" onPress={onStart} style={styles.nameAction}>
+                <Text style={styles.nameActionLabel}>Iniciar</Text>
+              </Pressable>
+            ) : null}
+            {onJoin ? (
+              <Pressable accessibilityRole="button" onPress={onJoin} style={[styles.nameAction, going ? styles.nameActionOn : null]}>
+                <Text style={[styles.nameActionLabel, going ? styles.nameActionLabelOn : null]}>I'm in</Text>
+              </Pressable>
+            ) : null}
+          </View>
           <View style={styles.sportLine}>
             <SportMark sport={meetup.sportId} size={16} />
             <Text style={styles.meta} numberOfLines={1}>
@@ -483,9 +613,16 @@ function MeetupCard({
             </Text>
           </View>
         </View>
-        <Text style={styles.time}>{ago(meetup.createdAt)}</Text>
+        <View style={styles.cardCorner}>
+          <Text style={styles.time}>{ago(meetup.createdAt)}</Text>
+          {onClose ? (
+            <Pressable accessibilityRole="button" accessibilityLabel="Cerrar" onPress={onClose} style={styles.close}>
+              <Text style={styles.closeLabel}>×</Text>
+            </Pressable>
+          ) : null}
+        </View>
       </View>
-      <View style={styles.plan}>
+      <View style={[styles.plan, compact ? styles.planCompact : null]}>
         <Text style={styles.place}>{meetup.placeName}</Text>
         <Text style={styles.planMeta}>
           {meetup.whenLabel} · a {formatDistance(km)}
@@ -495,11 +632,6 @@ function MeetupCard({
         {meetup.note ? <Text style={styles.planNote}>{meetup.note}</Text> : null}
       </View>
       {live ? <Text style={styles.startLabel}>En curso</Text> : null}
-      {onStart ? (
-        <Pressable accessibilityRole="button" onPress={onStart} style={styles.remove}>
-          <Text style={styles.startLabel}>Iniciar</Text>
-        </Pressable>
-      ) : null}
       {onFinish ? (
         <Pressable accessibilityRole="button" onPress={onFinish} style={styles.remove}>
           <Text style={styles.startLabel}>Terminar</Text>
@@ -562,6 +694,13 @@ function createStyles(colors: Palette, gutter: number) {
       lineHeight: 34,
       fontWeight: '700',
     },
+    headerMap: {
+      paddingBottom: 0,
+    },
+    titleMap: {
+      fontSize: 22,
+      lineHeight: 26,
+    },
     subtitle: {
       color: colors.muted,
       fontSize: 14,
@@ -585,13 +724,79 @@ function createStyles(colors: Palette, gutter: number) {
       color: colors.ink,
       fontSize: 15,
     },
-    toolRow: {
+    toolsMap: {
+      paddingTop: 10,
+      gap: 8,
+      zIndex: 4,
+    },
+    toolsFront: {
+      zIndex: 5,
+      elevation: 12,
+    },
+    split: {
       flexDirection: 'row',
       alignItems: 'center',
       gap: 8,
     },
-    toolRowMap: {
-      justifyContent: 'flex-end',
+    filterSlot: {
+      flex: 1,
+      minHeight: 40,
+    },
+    filterButton: {
+      height: 40,
+      borderRadius: 20,
+      borderWidth: 1,
+      borderColor: colors.line,
+      backgroundColor: colors.card,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    filterMenu: {
+      position: 'absolute',
+      top: 48,
+      left: 0,
+      right: 0,
+      gap: 8,
+      zIndex: 6,
+      elevation: 12,
+    },
+    filterOption: {
+      height: 40,
+      borderRadius: 20,
+      borderWidth: 1,
+      borderColor: colors.line,
+      backgroundColor: colors.card,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    filterOptionOn: {
+      backgroundColor: colors.actionSoft,
+    },
+    filterOptionLabelOn: {
+      color: colors.action,
+    },
+    splitButton: {
+      flex: 1,
+      height: 40,
+      borderRadius: 20,
+      borderWidth: 1,
+      borderColor: colors.line,
+      backgroundColor: colors.card,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    splitButtonOn: {
+      backgroundColor: colors.actionSoft,
+    },
+    splitLabel: {
+      color: colors.ink,
+      fontSize: 15,
+      fontWeight: '600',
+    },
+    toolRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
     },
     radiiScroll: {
       flex: 1,
@@ -629,6 +834,21 @@ function createStyles(colors: Palette, gutter: number) {
       padding: 14,
       gap: 12,
     },
+    cardCompact: {
+      padding: 10,
+      gap: 8,
+      borderRadius: 18,
+    },
+    cardDocked: {
+      marginHorizontal: 12,
+      marginBottom: 10,
+      borderRadius: 22,
+      borderWidth: 1,
+      borderColor: colors.line,
+    },
+    planCompact: {
+      paddingVertical: 8,
+    },
     pressed: {
       opacity: 0.82,
     },
@@ -658,6 +878,31 @@ function createStyles(colors: Palette, gutter: number) {
       color: colors.ink,
       fontSize: 15,
       fontWeight: '700',
+      flexShrink: 1,
+    },
+    nameLine: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+    },
+    nameAction: {
+      minHeight: 28,
+      paddingHorizontal: 10,
+      borderRadius: 14,
+      backgroundColor: colors.action,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    nameActionOn: {
+      backgroundColor: colors.actionSoft,
+    },
+    nameActionLabel: {
+      color: colors.onAction,
+      fontSize: 12,
+      fontWeight: '700',
+    },
+    nameActionLabelOn: {
+      color: colors.action,
     },
     sportLine: {
       flexDirection: 'row',
@@ -672,6 +917,24 @@ function createStyles(colors: Palette, gutter: number) {
     time: {
       color: colors.muted,
       fontSize: 12,
+    },
+    cardCorner: {
+      alignItems: 'flex-end',
+      gap: 4,
+    },
+    close: {
+      width: 28,
+      height: 28,
+      borderRadius: 14,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: colors.paper,
+    },
+    closeLabel: {
+      color: colors.ink,
+      fontSize: 20,
+      lineHeight: 22,
+      fontWeight: '500',
     },
     plan: {
       borderRadius: 16,
@@ -741,8 +1004,23 @@ function createStyles(colors: Palette, gutter: number) {
     },
     mapPane: {
       flex: 1,
+      overflow: 'hidden',
+      borderTopLeftRadius: 22,
+      borderTopRightRadius: 22,
+      borderWidth: 1,
+      borderBottomWidth: 0,
+      borderColor: colors.line,
     },
     mapWrap: {
+      flex: 1,
+      overflow: 'hidden',
+      borderTopLeftRadius: 22,
+      borderTopRightRadius: 22,
+      borderWidth: 1,
+      borderBottomWidth: 0,
+      borderColor: colors.line,
+    },
+    mapFill: {
       flex: 1,
     },
     mapTools: {
@@ -753,12 +1031,50 @@ function createStyles(colors: Palette, gutter: number) {
       flexDirection: 'row',
       gap: 8,
     },
-    sheet: {
+    dock: {
       position: 'absolute',
-      left: 12,
-      right: 12,
-      bottom: 12,
+      left: 0,
+      right: 0,
+      bottom: 0,
+      alignItems: 'flex-end',
+    },
+    locate: {
+      width: 48,
+      height: 48,
+      borderRadius: 24,
+      marginRight: 12,
+      marginBottom: 12,
+      borderWidth: 1,
+      borderColor: colors.line,
+      backgroundColor: colors.card,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    locateRing: {
+      width: 18,
+      height: 18,
+      borderRadius: 9,
+      borderWidth: 2,
+      borderColor: colors.action,
+    },
+    locateDot: {
+      position: 'absolute',
+      width: 6,
+      height: 6,
+      borderRadius: 3,
+      backgroundColor: colors.action,
+    },
+    locateDotOn: {
+      width: 10,
+      height: 10,
+      borderRadius: 5,
+    },
+    sheet: {
+      alignSelf: 'stretch',
       gap: 8,
+    },
+    sheetTools: {
+      paddingHorizontal: 12,
     },
   });
 }

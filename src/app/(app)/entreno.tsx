@@ -577,6 +577,7 @@ export default function EntrenoScreen() {
       sportId,
       level,
       whenLabel: soloRoute ? `${dateLabel(new Date())} · ${timeLabel(new Date())}` : `${dateLabel(when)} · ${timeLabel(when)}`,
+      whenAt: soloRoute ? undefined : when.toISOString(),
       placeName: name,
       latitude: here.latitude,
       longitude: here.longitude,

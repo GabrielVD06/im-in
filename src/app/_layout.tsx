@@ -4,6 +4,7 @@ import { StatusBar } from 'expo-status-bar';
 import * as SystemUI from 'expo-system-ui';
 import { useEffect, useState } from 'react';
 
+import { CitySync } from '@/state/city-sync';
 import { FriendsProvider } from '@/state/friends-context';
 import { MeetupProvider } from '@/state/meetup-context';
 import { ProfileProvider, useProfile } from '@/state/profile-context';
@@ -59,6 +60,7 @@ function RootNavigator() {
   return (
     <>
       <StatusBar style={scheme === 'dark' ? 'light' : 'dark'} />
+      <CitySync />
       <Stack
         screenOptions={{
           headerShown: false,

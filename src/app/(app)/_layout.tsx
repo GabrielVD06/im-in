@@ -3,6 +3,8 @@ import { useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { TabGlyph } from '@/components/tab-icon';
+import { isAdultAccount } from '@/domain/profile';
+import { useProfile } from '@/state/profile-context';
 import { useColors, useScheme } from '@/theme/colors';
 import { HideTabsProvider } from '@/ui/hide-tabs';
 
@@ -11,6 +13,8 @@ export const unstable_settings = {
 };
 
 export default function AppTabs() {
+  const { profile } = useProfile();
+  const adult = isAdultAccount(profile);
   const colors = useColors();
   const scheme = useScheme();
   const insets = useSafeAreaInsets();
@@ -57,6 +61,7 @@ export default function AppTabs() {
         name="salidas"
         options={{
           title: 'Salidas',
+          href: adult ? undefined : null,
           tabBarIcon: ({ color }) => <TabGlyph name="salidas" color={String(color)} />,
         }}
       />
@@ -64,6 +69,7 @@ export default function AppTabs() {
         name="gente"
         options={{
           title: 'Match',
+          href: adult ? undefined : null,
           tabBarIcon: ({ color }) => <TabGlyph name="gente" color={String(color)} />,
         }}
       />
@@ -78,6 +84,7 @@ export default function AppTabs() {
         name="mensajes"
         options={{
           title: 'Mensajes',
+          href: adult ? undefined : null,
           tabBarIcon: ({ color }) => <TabGlyph name="mensajes" color={String(color)} />,
         }}
       />

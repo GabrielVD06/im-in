@@ -1,7 +1,9 @@
+import { Redirect } from 'expo-router';
+
 import { InfoCard } from '@/components/panel';
 import { Screen } from '@/components/screen';
 import { isRouteSport } from '@/domain/meetup';
-import { levelName, sportName } from '@/domain/profile';
+import { isAdultAccount, levelName, sportName } from '@/domain/profile';
 import { routeMark } from '@/domain/route-goals';
 import { useMeetups } from '@/state/meetup-context';
 import { useProfile } from '@/state/profile-context';
@@ -9,6 +11,9 @@ import { useProfile } from '@/state/profile-context';
 export default function GenteScreen() {
   const { profile } = useProfile();
   const { meetups } = useMeetups();
+  if (!isAdultAccount(profile)) {
+    return <Redirect href="/entreno" />;
+  }
 
   return (
     <Screen title="Match" subtitle="Para conocer personas de Pasto con un deporte parecido al tuyo.">

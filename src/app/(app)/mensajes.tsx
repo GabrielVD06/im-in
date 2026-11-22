@@ -1,9 +1,12 @@
+import { Redirect } from 'expo-router';
 import { useMemo, useState } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { FadeSwap } from '@/components/fade-swap';
 import { PageSwitch } from '@/components/page-switch';
+import { isAdultAccount } from '@/domain/profile';
+import { useProfile } from '@/state/profile-context';
 import { space, useColors, type Palette } from '@/theme/colors';
 import { useFrame } from '@/ui/use-frame';
 
@@ -11,7 +14,11 @@ export default function MensajesScreen() {
   const colors = useColors();
   const frame = useFrame();
   const styles = useMemo(() => createStyles(colors, frame.gutter), [colors, frame.gutter]);
+  const { profile } = useProfile();
   const [page, setPage] = useState<'inbox' | 'requests'>('inbox');
+  if (!isAdultAccount(profile)) {
+    return <Redirect href="/entreno" />;
+  }
 
   const inbox = (
     <ScrollView contentContainerStyle={styles.list} showsVerticalScrollIndicator={false}>

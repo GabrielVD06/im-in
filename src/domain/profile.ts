@@ -37,12 +37,16 @@ export type SportChoice = {
   level: LevelId | null;
 };
 
+export type AgeBand = 'blocked' | 'teen' | 'adult';
+
 export type Profile = {
   name: string;
   lastName: string;
   email: string;
   username: string;
   ageConfirmed: boolean;
+  birthDate: string | null;
+  guardianAccepted: boolean;
   consents: ConsentChoice[];
   sports: SportChoice[];
   heightCm: number | null;
@@ -51,7 +55,7 @@ export type Profile = {
   bio: string;
   commentsOpen: boolean;
   likesPublic: boolean;
-  city: typeof CITY.id;
+  city: string;
   completedAt: string | null;
 };
 
@@ -61,6 +65,8 @@ export const emptyProfile = (): Profile => ({
   email: '',
   username: '',
   ageConfirmed: false,
+  birthDate: null,
+  guardianAccepted: false,
   consents: [],
   sports: [],
   heightCm: null,
@@ -69,7 +75,7 @@ export const emptyProfile = (): Profile => ({
   bio: '',
   commentsOpen: true,
   likesPublic: true,
-  city: CITY.id,
+  city: '',
   completedAt: null,
 });
 
@@ -94,6 +100,53 @@ export function bodyIndex(heightCm: number, weightKg: number) {
 
 export function formatBodyIndex(index: number) {
   return index.toFixed(1).replace('.', ',');
+}
+
+export function parseBirthDate(value: string | null | undefined) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value ?? '');
+  if (!match) {
+    return null;
+  }
+  const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+  if (date.getFullYear() !== Number(match[1]) || date.getMonth() !== Number(match[2]) - 1 || date.getDate() !== Number(match[3])) {
+    return null;
+  }
+  return date;
+}
+
+export function birthDateKey(date: Date) {
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${date.getFullYear()}-${month}-${day}`;
+}
+
+export function yearsOld(birth: Date, now = new Date()) {
+  let years = now.getFullYear() - birth.getFullYear();
+  const month = now.getMonth() - birth.getMonth();
+  if (month < 0 || (month === 0 && now.getDate() < birth.getDate())) {
+    years -= 1;
+  }
+  return years;
+}
+
+export function ageBand(birthDate: string | null | undefined, now = new Date()): AgeBand | null {
+  const birth = parseBirthDate(birthDate);
+  if (!birth || birth.getTime() > now.getTime()) {
+    return null;
+  }
+  const years = yearsOld(birth, now);
+  if (years < 13) {
+    return 'blocked';
+  }
+  if (years < 18) {
+    return 'teen';
+  }
+  return 'adult';
+}
+
+export function isAdultAccount(profile: Pick<Profile, 'birthDate'>) {
+  const band = ageBand(profile.birthDate);
+  return band === null || band === 'adult';
 }
 
 export function consentAccepted(profile: Profile, id: ConsentId) {

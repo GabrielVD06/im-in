@@ -1,6 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 
+import { displayCity } from '@/domain/cities';
 import { emptyProfile, type Profile } from '@/domain/profile';
 
 const STORAGE_KEY = 'salida.profile.v1';
@@ -32,7 +33,7 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
         setProfile({
           ...emptyProfile(),
           ...stored,
-          city: 'pasto',
+          city: displayCity(typeof stored.city === 'string' ? stored.city : ''),
           commentsOpen: stored.commentsOpen !== false,
           likesPublic: stored.likesPublic !== false,
         });
@@ -56,7 +57,7 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
       ready,
       profile,
       async save(patch) {
-        const next = { ...profileRef.current, ...patch, city: 'pasto' as const };
+        const next = { ...profileRef.current, ...patch };
         profileRef.current = next;
         setProfile(next);
         await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(next));

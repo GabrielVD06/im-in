@@ -1,4 +1,5 @@
 import * as Location from 'expo-location';
+import { Redirect } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
 import { Linking, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -8,9 +9,10 @@ import { SportMark } from '@/components/sport-marks';
 import { FadeSwap } from '@/components/fade-swap';
 import { PageSwitch } from '@/components/page-switch';
 import { Button, Pill } from '@/components/button';
+import { displayCity } from '@/domain/cities';
 import { PASTO, RADII_KM, distanceKm, formatDistance, type LatLng, type RadiusKm } from '@/domain/geo';
 import { canBeginMeetup, isPublicMeetup, isRouteSport, meetupPoint, planSummary, type Meetup } from '@/domain/meetup';
-import { SPORTS, consentAccepted, levelName, sportName, upsertConsent, type SportId } from '@/domain/profile';
+import { SPORTS, consentAccepted, isAdultAccount, levelName, sportName, upsertConsent, type SportId } from '@/domain/profile';
 import { traceSpeedCap } from '@/domain/trace-fix';
 import { useMeetups } from '@/state/meetup-context';
 import { useProfile } from '@/state/profile-context';
@@ -54,6 +56,7 @@ export default function SalidasScreen() {
   const frame = useFrame();
   const styles = useMemo(() => createStyles(colors, frame.gutter), [colors, frame.gutter]);
   const { point, heading, locate } = useDeviceLocation();
+  const city = displayCity(profile.city);
   const trace = useTrace();
   const steps = useStepCounter(trace.active);
   const [trackingId, setTrackingId] = useState<string | null>(null);
@@ -84,7 +87,6 @@ export default function SalidasScreen() {
         return;
       }
       setSearch(next);
-      setMapCenter(next);
       setFocus({ ...next, token: 1 });
     });
     return () => {
@@ -108,13 +110,16 @@ export default function SalidasScreen() {
       .sort((a, b) => a.km - b.km);
   }, [meetups, query, radius, search]);
   const mapped = useMemo(() => {
+    if (page !== 'public') {
+      return [];
+    }
     const anchor = point ?? search;
     return meetups
       .filter(isPublicMeetup)
       .filter((meetup) => !sportFilter || meetup.sportId === sportFilter)
       .map((meetup) => ({ meetup, km: distanceKm(anchor, meetupPoint(meetup)) }))
       .sort((a, b) => a.km - b.km);
-  }, [meetups, point, search, sportFilter]);
+  }, [page, meetups, point, search, sportFilter]);
   const markers = useMemo(
     () =>
       mapped.flatMap(({ meetup }) => {
@@ -142,7 +147,6 @@ export default function SalidasScreen() {
 
   function jump(next: LatLng) {
     setSearch(next);
-    setMapCenter(next);
     setFocus({ ...next, token: Date.now() });
   }
 
@@ -229,19 +233,10 @@ export default function SalidasScreen() {
     return () => clearInterval(timer);
   }, []);
 
+  const filterLabel = page === 'friends' ? 'Amigos' : page === 'events' ? 'Eventos' : sportFilter ? sportName(sportFilter) : 'Filtro';
   const feed = (
-    <FadeSwap pageKey={page} style={styles.swap}>
-      {page === 'friends' ? (
-        <View style={styles.emptyWrap}>
-          <Text style={styles.emptyTitle}>Aún no hay amigos</Text>
-          <Text style={styles.emptyBody}>Cuando tengas amigos, aquí ves sus salidas y sus posts.</Text>
-        </View>
-      ) : page === 'events' ? (
-        <View style={styles.emptyWrap}>
-          <Text style={styles.emptyTitle}>Aún no hay eventos</Text>
-          <Text style={styles.emptyBody}>Aquí se publican las carreras y los eventos oficiales de Pasto.</Text>
-        </View>
-      ) : showMap && !frame.tablet ? (
+    <FadeSwap pageKey={mapOpen ? 'map' : page} style={styles.swap}>
+      {showMap && !frame.tablet ? (
         <View style={styles.mapWrap}>
           <MapPane
             markers={markers}
@@ -266,6 +261,16 @@ export default function SalidasScreen() {
             onClose={() => setSelectedId(null)}
             onRemove={remove}
           />
+        </View>
+      ) : page === 'friends' ? (
+        <View style={styles.emptyWrap}>
+          <Text style={styles.emptyTitle}>Aún no hay amigos</Text>
+          <Text style={styles.emptyBody}>Cuando tengas amigos, aquí ves sus posts, con imagen, y sus salidas.</Text>
+        </View>
+      ) : page === 'events' ? (
+        <View style={styles.emptyWrap}>
+          <Text style={styles.emptyTitle}>Aún no hay eventos</Text>
+          <Text style={styles.emptyBody}>Las carreras y los eventos oficiales van aquí como posts, con imagen.</Text>
         </View>
       ) : (
         <ScrollView contentContainerStyle={styles.list} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
@@ -301,6 +306,10 @@ export default function SalidasScreen() {
     </FadeSwap>
   );
 
+  if (!isAdultAccount(profile)) {
+    return <Redirect href="/entreno" />;
+  }
+
   return (
     <View style={styles.frame}>
       <SafeAreaView style={[styles.safe, frame.wide && !frame.tablet ? styles.safeWide : null]} edges={['top', 'left', 'right']}>
@@ -309,27 +318,31 @@ export default function SalidasScreen() {
             <View style={[styles.header, mapOpen ? styles.headerMap : null]}>
               <Text style={[styles.title, mapOpen ? styles.titleMap : null]}>Salidas</Text>
               {mapOpen ? null : (
-                <Text style={styles.subtitle}>{point ? 'Cerca de ti, en Pasto.' : 'Activa la ubicación para ver las que te quedan cerca.'}</Text>
+                <Text style={styles.subtitle}>{point ? `Cerca de ti, en ${city}.` : 'Activa la ubicación para ver las que te quedan cerca.'}</Text>
               )}
               {locateMessage ? <Text style={styles.note}>{locateMessage}</Text> : null}
             </View>
-            <PageSwitch
-              value={page}
-              options={[
-                { id: 'public', label: 'Públicas' },
-                { id: 'friends', label: 'Amigos' },
-                { id: 'events', label: 'Eventos' },
-              ]}
-              onChange={(id) => {
-                const next = id === 'friends' || id === 'events' ? id : 'public';
-                setPage(next);
-                if (next !== 'public') {
-                  setShowMap(false);
+            {mapOpen ? (
+              <View style={styles.brandRow}>
+                <Text style={styles.brand}>I'm in</Text>
+              </View>
+            ) : (
+              <PageSwitch
+                value={page}
+                options={[
+                  { id: 'public', label: 'Públicas' },
+                  { id: 'friends', label: 'Amigos' },
+                  { id: 'events', label: 'Eventos' },
+                ]}
+                onChange={(id) => {
+                  const next = id === 'friends' || id === 'events' ? id : 'public';
+                  setPage(next);
                   setFilterOpen(false);
-                }
-              }}
-            />
-            {page === 'public' ? (
+                  setShowMap(false);
+                }}
+              />
+            )}
+            {mapOpen || page === 'public' ? (
               <View style={[styles.tools, mapOpen ? styles.toolsMap : null, filterOpen ? styles.toolsFront : null]}>
                 {mapOpen ? (
                   <>
@@ -338,11 +351,29 @@ export default function SalidasScreen() {
                         <Pressable
                           accessibilityRole="button"
                           onPress={() => setFilterOpen((open) => !open)}
-                          style={[styles.filterButton, sportFilter ? styles.splitButtonOn : null]}>
-                          <Text style={styles.splitLabel}>{sportFilter ? sportName(sportFilter) : 'Filtro'}</Text>
+                          style={[styles.filterButton, page !== 'public' || sportFilter ? styles.splitButtonOn : null]}>
+                          <Text style={styles.splitLabel}>{filterLabel}</Text>
                         </Pressable>
                         {filterOpen ? (
                           <View style={styles.filterMenu}>
+                            {([
+                              ['public', 'Públicas'],
+                              ['friends', 'Amigos'],
+                              ['events', 'Eventos'],
+                            ] as const).map(([id, label]) => (
+                              <Pressable
+                                key={id}
+                                accessibilityRole="button"
+                                onPress={() => {
+                                  setPage(id);
+                                  if (id !== 'public') setSelectedId(null);
+                                  setFilterOpen(false);
+                                }}
+                                style={[styles.filterOption, page === id ? styles.filterOptionOn : null]}>
+                                <Text style={[styles.splitLabel, page === id ? styles.filterOptionLabelOn : null]}>{label}</Text>
+                              </Pressable>
+                            ))}
+                            <View style={styles.filterDivider} />
                             <Pressable
                               accessibilityRole="button"
                               onPress={() => {
@@ -701,6 +732,18 @@ function createStyles(colors: Palette, gutter: number) {
       fontSize: 22,
       lineHeight: 26,
     },
+    brandRow: {
+      minHeight: 52,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    brand: {
+      color: colors.ink,
+      fontSize: 32,
+      lineHeight: 40,
+      fontWeight: '700',
+      fontStyle: 'italic',
+    },
     subtitle: {
       color: colors.muted,
       fontSize: 14,
@@ -759,6 +802,11 @@ function createStyles(colors: Palette, gutter: number) {
       gap: 8,
       zIndex: 6,
       elevation: 12,
+    },
+    filterDivider: {
+      height: 1,
+      backgroundColor: colors.line,
+      marginVertical: 2,
     },
     filterOption: {
       height: 40,

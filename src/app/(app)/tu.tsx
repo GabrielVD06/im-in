@@ -8,7 +8,8 @@ import { Button } from '@/components/button';
 import { ProfileBoard } from '@/components/profile-board';
 import { isRouteSport } from '@/domain/meetup';
 import { SportMark } from '@/components/sport-marks';
-import { CITY, levelName, sportName } from '@/domain/profile';
+import { displayCity } from '@/domain/cities';
+import { isAdultAccount, levelName, sportName } from '@/domain/profile';
 import { routeMark } from '@/domain/route-goals';
 import { useFriends } from '@/state/friends-context';
 import { useMeetups } from '@/state/meetup-context';
@@ -17,6 +18,7 @@ import { space, useColors, type Palette } from '@/theme/colors';
 
 export default function TuScreen() {
   const { profile } = useProfile();
+  const city = displayCity(profile.city);
   const { meetups } = useMeetups();
   const { friends } = useFriends();
   const colors = useColors();
@@ -60,7 +62,8 @@ export default function TuScreen() {
               </Pressable>
             </View>
             <Text style={styles.name}>{fullName || 'Tu perfil'}</Text>
-            <Text style={styles.city}>{CITY.name}</Text>
+            <Text style={styles.city}>{city}</Text>
+            {isAdultAccount(profile) ? null : <Text style={styles.city}>Tu perfil es privado hasta los 18.</Text>}
             <Pressable accessibilityRole="button" accessibilityLabel="Ver amigos" onPress={() => setFriendsOpen(true)} style={styles.friendsStat}>
               <Text style={styles.friendsCount}>{friends.length}</Text>
               <Text style={styles.friendsLabel}>{friends.length === 1 ? 'amigo' : 'amigos'}</Text>
